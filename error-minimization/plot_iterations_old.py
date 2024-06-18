@@ -35,7 +35,7 @@ for i in tqdm.trange(num_samples):
         wiener = utils.Wiener(X_train, d_train, h_star=h_star)
 
         alpha0 = 10 ** (-SNR/10)
-        alpha1[i,s,:], _, _ = wiener.alpha_mckay(num_iters=num_iters, alpha0=0.5)
+        alpha1[i,s,:], _, _ = wiener.alpha_mackay(num_iters=num_iters, alpha0=0.5)
         best_alpha[i,s,:] = wiener.best_alpha(mode='mis')
 
 fig, ax = plt.subplots()
@@ -58,7 +58,7 @@ ax.legend(loc='upper right')
 ax.grid()
 fig.tight_layout()
 
-putils.save_fig(fig, 'mckay_iteration', format='pdf')
+putils.save_fig(fig, 'mackay_iteration', format='pdf')
 
 
 print()

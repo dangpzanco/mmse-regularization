@@ -104,7 +104,7 @@ def run_experiment(h_star, L=None, Ns=None, SNR=None, num_samples=1, ar1=0.9):
     )
 
     best_alpha = dict(
-        mckay=np.zeros([Ns.size, SNR.size, num_samples]),
+        mackay=np.zeros([Ns.size, SNR.size, num_samples]),
         barber=np.zeros([Ns.size, SNR.size, num_samples]),
         mis=np.zeros([Ns.size, SNR.size, num_samples]),
         valid=np.zeros([Ns.size, SNR.size, num_samples]),
@@ -118,13 +118,13 @@ def run_experiment(h_star, L=None, Ns=None, SNR=None, num_samples=1, ar1=0.9):
 
                 wiener = Wiener(X_train, d_train, h_star=h_star, X_valid=X_valid, d_valid=d_valid)
                 options = dict(alpha0=0.5, num_iters=5)
-                best_alpha['mckay'][n, s, r] = wiener.best_alpha(mode='mckay', **options)
+                best_alpha['mackay'][n, s, r] = wiener.best_alpha(mode='mackay', **options)
                 best_alpha['barber'][n, s, r] = wiener.best_alpha(mode='barber', **options)
 
                 best_alpha['mis'][n, s, r] = wiener.best_alpha(mode='mis')
                 best_alpha['valid'][n, s, r] = wiener.best_alpha(mode='valid')
 
-                wiener.alpha = best_alpha['mckay'][n, s, r]
+                wiener.alpha = best_alpha['mackay'][n, s, r]
                 error_bayes['mis'][n, s, r] = wiener.misalignment
                 error_bayes['valid'][n, s, r] = wiener.mse_valid
 
@@ -141,6 +141,53 @@ def run_experiment(h_star, L=None, Ns=None, SNR=None, num_samples=1, ar1=0.9):
 
     return error_grid, error_bayes, best_alpha
 
+
+
+def run_experiment2(h_star, L=None, Ns=None, SNR=None, num_samples=1, ar1=0.9):
+
+    if Ns is None:
+        Ns = np.logspace(np.log10(L), np.log10(L)+1, 50).astype(int)
+
+    if SNR is None:
+        SNR = np.array([0, 5, 10, 15, 20, 25])
+
+    misalignment = dict(
+        mackay=np.zeros([Ns.size, SNR.size, num_samples]),
+        barber=np.zeros([Ns.size, SNR.size, num_samples]),
+        ledoit=np.zeros([Ns.size, SNR.size, num_samples]),
+        hkb=np.zeros([Ns.size, SNR.size, num_samples]),
+        lawless=np.zeros([Ns.size, SNR.size, num_samples]),
+        grid=np.zeros([Ns.size, SNR.size, num_samples]),
+    )
+
+    best_alpha = dict(
+        mackay=np.zeros([Ns.size, SNR.size, num_samples]),
+        barber=np.zeros([Ns.size, SNR.size, num_samples]),
+        ledoit=np.zeros([Ns.size, SNR.size, num_samples]),
+        hkb=np.zeros([Ns.size, SNR.size, num_samples]),
+        lawless=np.zeros([Ns.size, SNR.size, num_samples]),
+        grid=np.zeros([Ns.size, SNR.size, num_samples]),
+    )
+
+    for n, N in enumerate(tqdm.tqdm(Ns)):
+        for s in tqdm.trange(SNR.size, leave=False):
+            for r in tqdm.trange(num_samples, leave=False):
+                X_train, d_train = generate_signals(h_star, L, N, SNR[s], alpha=ar1)
+                X_valid, d_valid = generate_signals(h_star, L, N, SNR[s], alpha=ar1)
+
+                wiener = Wiener(X_train, d_train, h_star=h_star, X_valid=X_valid, d_valid=d_valid)
+                options = dict(alpha0=0.5, num_iters=5)
+                for key in best_alpha.keys():
+                    alpha = wiener.best_alpha(mode=key, **options)
+                    best_alpha[key][n, s, r] = alpha
+                    wiener.alpha = alpha
+                    misalignment[key][n, s, r] = wiener.misalignment
+
+
+    for key in misalignment.keys():
+        misalignment[key] = 10 * np.log10(misalignment[key])
+
+    return misalignment, best_alpha
 
 
 class Wiener():
@@ -213,13 +260,13 @@ class Wiener():
 
     def misalignment_alpha(self, alpha):
         h_alpha = self.h_alpha(alpha)
-        return la.norm(h_alpha - self.h_star[:self.L, None], axis=0) ** 2 / self.norm_star
+        return la.norm(h_alpha - self.h_star[:self.L]) ** 2 / self.norm_star
 
     def mse_valid_alpha(self, alpha):
         h_alpha = self.h_alpha(alpha)
-        return la.norm(self.d_valid[:, None] - self.X_valid.T @ h_alpha, axis=0) ** 2 / self.N
+        return la.norm(self.d_valid - self.X_valid.T @ h_alpha) ** 2 / self.N
 
-    def alpha_mckay(self, num_iters=5, alpha0=1, v0=None):
+    def alpha_mackay(self, num_iters=5, alpha0=1, v0=None):
 
         alpha = np.zeros(num_iters+1)
         v_e = np.ones(num_iters+1)
@@ -240,40 +287,6 @@ class Wiener():
 
             v_e[i+1] = self.N * mse / (self.N - lambA)
             v_h[i+1] = norm_h / lambA
-
-            alpha[i+1] = v_e[i+1] / (v_h[i+1] * self.N)
-
-        try:
-            assert alpha[-1] > 0
-        except AssertionError:
-            print('alpha[-1] =', alpha[-1])
-            raise
-
-        return alpha, v_e, v_h
-
-    def _alpha_mckay(self, num_iters=5, alpha0=1, v0=None):
-
-        alpha = np.zeros(num_iters+1)
-        v_e = np.ones(num_iters+1)
-        v_h = np.ones(num_iters+1)
-
-        if v0 is None:
-            alpha[0] = alpha0
-        else:
-            v_e[0], v_h[0] = v0
-            alpha[0] = v_e[0] / (v_h[0] * self.N)
-
-        zxd2 = self.zxd ** 2
-        for i in range(num_iters):
-
-            lambA = 1 / (self.lamb + alpha[i])
-            llambA = np.sum(self.lamb * lambA)
-            zlambA2 = zxd2 * lambA ** 2
-
-            mse = self.norm_d - np.sum(zlambA2 * (self.lamb + 2*alpha[i]))
-
-            v_e[i+1] = self.N * mse / (self.N - llambA)
-            v_h[i+1] = zlambA2.sum() / llambA
 
             alpha[i+1] = v_e[i+1] / (v_h[i+1] * self.N)
 
@@ -313,23 +326,110 @@ class Wiener():
 
         return alpha, v_e, v_h
 
-    def best_alpha(self, mode='mckay', num_iters=5, alpha0=None):
-        if mode == 'mckay':
-            alpha = self.alpha_mckay(num_iters=num_iters, alpha0=alpha0)[0][-1]
+    def alpha_ledoit(self):
+        """
+        Ledoit-Wolf shrinkage
+        """
+        from sklearn.covariance import LedoitWolf
+        ledoit = LedoitWolf()
+        ledoit.fit(self.X_train.T)
+
+        # (1 - shrinkage) * cov + shrinkage * mu * np.identity(n_features)
+        mu = np.trace(self.Rx) / self.L
+        nu = ledoit.shrinkage_
+        beta = 1 - nu
+        eta = nu * mu
+        alpha = eta / beta
+
+        # rho = np.sum(la.norm(self.x, axis=0) ** 4) / self.N**2 - la.norm(self.Rx, 'fro')**2 / self.N
+        # nu = np.trace(self.Rx) / self.L
+
+        # alpha = np.minimum(nu * rho / la.norm(self.Rx - nu * np.eye(self.L), 'fro')**2, nu)
+        # beta = 1 - alpha / nu
+
+        try:
+            assert alpha > 0
+            assert beta > 0
+        except AssertionError:
+            print('alpha =', alpha)
+            print('alpha =', beta)
+
+        return alpha / beta
+
+
+    def alpha_hkb(self):
+        """
+        Compute the optimal alpha using Hoerl, Kennard, and Baldwin's method.
+        Requires N >= M.
+        """
+        w = self.h_alpha(0)
+        mse = la.norm(self.d_train - self.X_train.T @ w) ** 2 / self.N
+        norm_w = la.norm(w) ** 2 / self.L
+
+        alpha = mse / norm_w
+
+        try:
+            assert alpha > 0
+        except AssertionError:
+            print('alpha =', alpha)
+            # raise
+
+        return alpha
+
+    def alpha_lawless(self):
+        """
+        Compute the optimal alpha using Lawless and Wang's method.
+        Requires N >= M.
+        """
+        w = self.h_alpha(0)
+        mse = la.norm(self.d_train - self.X_train.T @ w) ** 2 / self.N
+        norm_pred = la.norm(self.X_train.T @ w) ** 2 / self.L
+
+        alpha = mse / norm_pred
+
+        try:
+            assert alpha > 0
+        except AssertionError:
+            print('alpha =', alpha)
+            # raise
+
+        return alpha
+
+    def alpha_grid(self, mode='mis'):
+        import scipy.optimize as opt
+        if mode == 'mis':
+            fun = self.misalignment_alpha
+        elif mode == 'valid':
+            fun = self.mse_valid_alpha
+        res = opt.minimize_scalar(fun)
+
+        return res.x
+
+    def best_alpha(self, mode='mackay', num_iters=5, alpha0=None):
+        if mode == 'mackay':
+            alpha = self.alpha_mackay(num_iters=num_iters, alpha0=alpha0)[0][-1]
         elif mode == 'barber':
             alpha = self.alpha_barber(num_iters=num_iters, alpha0=alpha0)[0][-1]
-        elif mode == 'mis':
-            alpha0 = np.log10(self.alpha_mckay()[0][-1])
-            alpha_vec = np.logspace(alpha0-1, alpha0+1, 1000)
-            mis = self.misalignment_alpha(alpha_vec)
-            # mis = la.norm(self.h_alpha(alpha_vec) - self.h_star[:self.L, None], axis=0)
-            alpha = alpha_vec[np.argmin(mis)]
+        elif mode == 'ledoit':
+            alpha = self.alpha_ledoit()
+        elif mode == 'hkb':
+            alpha = self.alpha_hkb()
+        elif mode == 'lawless':
+            alpha = self.alpha_lawless()
+        elif mode == 'mis' or mode == 'grid':
+            alpha = self.alpha_grid(mode='mis')
+            # alpha0 = np.log10(self.alpha_mackay()[0][-1])
+            # alpha_vec = np.logspace(alpha0-1, alpha0+1, 1000)
+            # mis = self.misalignment_alpha(alpha_vec)
+            # # mis = la.norm(self.h_alpha(alpha_vec) - self.h_star[:self.L, None], axis=0)
+            # alpha = alpha_vec[np.argmin(mis)]
         elif mode == 'valid':
-            alpha0 = np.log10(self.alpha_mckay()[0][-1])
-            alpha_vec = np.logspace(alpha0-1, alpha0+1, 1000)
-            mse = self.mse_valid_alpha(alpha_vec)
-            # mse = la.norm(self.d_valid[:, None] - self.X_valid.T @ self.h_alpha(alpha_vec), axis=0)
-            alpha = alpha_vec[np.argmin(mse)]
+            alpha = self.alpha_grid(mode='valid')
+            # alpha0 = np.log10(self.alpha_mackay()[0][-1])
+            # alpha_vec = np.logspace(alpha0-1, alpha0+1, 1000)
+            # mse = self.mse_valid_alpha(alpha_vec)
+            # # mse = la.norm(self.d_valid[:, None] - self.X_valid.T @ self.h_alpha(alpha_vec), axis=0)
+            # alpha = alpha_vec[np.argmin(mse)]
         return alpha
 
 

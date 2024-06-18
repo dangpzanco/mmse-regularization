@@ -43,12 +43,12 @@ def plot_alpha(best_alpha, Ns, SNR, ax=None):
             color=color_list[i], alpha=1/num_samples)
 
         ax.plot(
-            Ns, best_alpha['mckay'][:,i,].mean(axis=-1),
+            Ns, best_alpha['mackay'][:,i,].mean(axis=-1),
             color=color_list[i],
             ls='--',
         )
         putils.plot_with_fill(
-            ax, Ns, best_alpha['mckay'][:,i,],
+            ax, Ns, best_alpha['mackay'][:,i,],
             ls='--',
             color=color_list[i], alpha=1/num_samples)
     ax.legend(loc='upper right')
